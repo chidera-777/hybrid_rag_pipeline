@@ -1,21 +1,31 @@
 import requests
-import json
-
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_groq import ChatGroq
+from config import *
 
 class Generator:
-    def __init__(self, use_local:bool=False):
-        self.use_local = use_local
-        if not self.use_local:
-            self.llm = LLM
-            
+    def __init__(self):
+        self.prompt = None
+        self.llm = ChatGroq(
+            api_key=GROQ_API_KEY,
+            model="llama-3.3-70b-versatile",
+            temperature=0.6,
+        )
+        
     def generate(self, query:str, chunks:list):
         context = self.build_context(chunks)
         prompt = self.build_prompt(query, context)
-        
-        if self.use_local:
-            return self.generate_ollama(prompt, chunks)
+        if self.llm is not None:
+            chain = prompt | self.llm | StrOutputParser()
+            answer_text = chain.invoke({"context": context, "query": query})
+            return {
+                "answer": answer_text,
+                "sources": [chunk.metadata for chunk in chunks],
+                "model": "llama-3.3-70b-versatile"
+            }
         else:
-            return self.generate_llm(prompt, chunks)
+            raise RuntimeError("No LLM found to generate answer")
         
     def build_context(self, chunks:list):
         context = ""
@@ -25,30 +35,23 @@ class Generator:
         return context
     
     def build_prompt(self, query:str, context:str):
-        return """
-            You are a friendly and helpful AI Assistant.
-            You are only allowed to answer queries with the provided context given below.
-            After every claim, you are to cite your claims like this: [Source 1].
-            You are not allowed to use your own knowledge to answer any user query. If no context was provided to aid you answer the user's query, tell the user that you cannot help with the query.
-            {context}
-            Question: {query}
-            Answer:
-        """
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a helpful AI assistant that answers questions strictly based on the retrieved context provided to you.
+                ## Core Behavior
+                - Base **90% or more** of every response directly on the provided context. Use your own general knowledge only to improve clarity, grammar, or to briefly fill minor gaps — never to introduce new facts or claims not found in the context.
+                - If the context does not contain enough information to answer the query, explicitly say: "The provided context does not contain sufficient information to answer this question fully." Do not fabricate or assume facts.
+
+                ## Citations
+                - After every factual claim or sentence drawn from the context, add an inline citation in this format: [Source N], where N corresponds to the source number in the context provided.
+                - If a claim draws from multiple sources, cite all of them: [Source 1][Source 3].
+                - Do not cite your own general knowledge — only cite claims traceable to the context.
+
+                ## Response Format
+                - Answer in clear, concise prose.
+                - If no context is provided at all, respond with: "I don't have any context to draw from to answer your question. Please ensure relevant documents have been retrieved.
+             """),
+            ("human", "Context:\n{context}\n\nQuestion: {query}\nAnswer:")
+        ])
+        return self.prompt
         
-    def generate_llm(self, prompt, chunks):
-        pass
     
-    def generate_ollama(self, prompt, chunks):
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "llama3.1:8b",
-                "prompt": prompt,
-                "stream": False
-            }
-        )
-        return {
-            "answer": response.json()["response"],
-            "sources": [chunk.metadata for chunk in chunks],
-            "model": "llama3.1:8b-local"
-        }

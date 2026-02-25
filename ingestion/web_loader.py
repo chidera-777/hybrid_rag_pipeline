@@ -71,11 +71,7 @@ class WebLoader(BaseLoader):
 
             if response.status_code == 200:
                 return response.text
-            elif response.status_code == 403:
-                print(f"[requests] 403 Forbidden — trying next strategy")
-                return None
             else:
-                print(f"[requests] Status {response.status_code}")
                 return None
 
         except requests.RequestException as e:
@@ -113,7 +109,6 @@ class WebLoader(BaseLoader):
             return html
             
         except Exception as e:
-            print(f"[selenium] Failed: {e}")
             try:
                 driver.quit()
             except:
@@ -126,12 +121,10 @@ class WebLoader(BaseLoader):
         
         html = self.fetch_with_requests(url)
         if html:
-            print("Fetched with requests")
             return html, "requests"
 
         html = self.fetch_with_selenium(url)
         if html:
-            print("Fetched with selenium")
             return html, "selenium"
         return None, None
     

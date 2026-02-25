@@ -10,7 +10,7 @@ class Document:
     
     @property
     def content_hash(self):
-        hash_input = f"{self.metadata.get("source", "")}{self.content}"
+        hash_input = f"{self.metadata.get('source', '')}{self.content}"
         return hashlib.sha256(hash_input.encode()).hexdigest()[:16]
     
     @property
