@@ -2,13 +2,16 @@ import requests
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_groq import ChatGroq
-from config import *
+import os
+import dotenv
+
+dotenv.load_dotenv()
 
 class Generator:
     def __init__(self):
         self.prompt = None
         self.llm = ChatGroq(
-            api_key=GROQ_API_KEY,
+            api_key=os.getenv("GROQ_API_KEY"),
             model="llama-3.3-70b-versatile",
             temperature=0.6,
         )

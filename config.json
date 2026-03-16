@@ -1,0 +1,5 @@
+{
+    "COLLECTION_NAME" : "rag_docs",
+    "QDRANT_URL" : "https://dc4e908e-1205-499c-982a-c222da433529.sa-east-1-0.aws.cloud.qdrant.io",
+    "QDRANT_API_KEY" : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.CEz2ylZ4HeNJPpIVgqDUsMNtKm7CrkCw6-Ij3cYePS0"
+}

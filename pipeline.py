@@ -2,7 +2,7 @@ import time
 import os
 import logging
 from transformers.utils import logging as hf_logging
-from typing import List
+from typing import List, Optional
 from ingestion.base_loader import Document
 from vectorstore.qdrant_store import QdrantStore
 from retrieval.sparse_retriever import SparseRetriever
@@ -14,7 +14,16 @@ from config import *
 
 
 class RAGPipeline:
-    def __init__(self, use_diversity:bool=False):
+    def __init__(
+        self,
+        qdrant_url: str = "QDRANT_URL",
+        qdrant_api_key: str = "QDRANT_API_KEY",
+        collection_name: str = "COLLECTION_NAME",
+        use_diversity: bool = True,
+        embedder: Optional[object] = None,
+        reranker: Optional[Reranker] = None,
+        generator: Optional[Generator] = None
+    ):
         hf_logging.set_verbosity_error()
         hf_logging.disable_progress_bar()
         logging.getLogger("transformers").setLevel(logging.ERROR)
@@ -23,17 +32,18 @@ class RAGPipeline:
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
         self.use_diversity = use_diversity
         self.vector_store = QdrantStore(
-            url=QDRANT_URL,
-            api_key=QDRANT_API_KEY,
-            collection_name=COLLECTION_NAME
+            url=qdrant_url,
+            api_key=qdrant_api_key,
+            collection_name=collection_name,
+            embedder=embedder
         )
         stats = self.vector_store.get_collection_stats()
         if stats["total_chunks"] == 0:
             raise RuntimeError("No chunks found in the collection. Please run the ingestion pipeline first.")
         self.chunks = self.load_all_chunks()
         self.sparse_retriever = SparseRetriever(self.chunks)
-        self.reranker = Reranker()
-        self.generator = Generator()
+        self.reranker = reranker or Reranker()
+        self.generator = generator or Generator()
         
         
     def load_all_chunks(self):

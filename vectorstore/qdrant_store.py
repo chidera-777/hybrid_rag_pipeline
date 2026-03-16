@@ -5,11 +5,14 @@ from qdrant_client.models import VectorParams, Distance, PointStruct, Filter, Fi
 from sentence_transformers import SentenceTransformer
 import uuid
 import numpy as np
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class QdrantStore:
-    def __init__(self, url, api_key, collection_name="rag_documents",):
+    def __init__(self, url, api_key, collection_name="rag_documents", embedder=None):
         self.client = QdrantClient(url=url, api_key=api_key, timeout=300)
-        self.embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        self.embedder = embedder or SentenceTransformer("all-MiniLM-L6-v2")
         self.collection_name = collection_name
         self._create_collection()
         
@@ -23,7 +26,7 @@ class QdrantStore:
                     vectors_config=VectorParams(size=384, distance=Distance.COSINE)
                 )
             except Exception as e:
-                 print(f"Error creating collection: {e}")
+                logging.error(f"Error creating collection: {e}")
             
     
     def get_existing_chunk_ids(self):
@@ -100,7 +103,7 @@ class QdrantStore:
                 points = self.build_points(batch, embeddings)
                 self.client.upsert(collection_name=self.collection_name, points=points)
                 stats["added"] += len(batch)
-                print(f"Uploaded batch {i//batch_size + 1}: {len(batch)} chunks")
+                logging.info(f"Uploaded batch {i//batch_size + 1}: {len(batch)} chunks")
             except Exception:
                 mini = 10
                 for j in range(0, len(batch), mini):
@@ -109,7 +112,7 @@ class QdrantStore:
                     sub_points = self.build_points(sub_batch, sub_embeddings)
                     self.client.upsert(collection_name=self.collection_name, points=sub_points)
                     stats["added"] += len(sub_batch)
-                print(f"Uploaded batch {i//batch_size + 1} in {mini}-chunk segments")
+                logging.info(f"Uploaded batch {i//batch_size + 1} in {mini}-chunk segments")
         return stats
     
     
@@ -128,7 +131,7 @@ class QdrantStore:
             )
             return True
         except Exception as e:
-            print(f"Error deleting documents by source {source}: {e}")
+            logging.error(f"Error deleting documents by source {source}: {e}")
             return False
         
         

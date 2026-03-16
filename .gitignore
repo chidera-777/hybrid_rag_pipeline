@@ -3,3 +3,4 @@ data
 *.pyc
 qdrant_storage
 .env
+.bruno(rag)
