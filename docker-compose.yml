@@ -1,0 +1,35 @@
+version: "3.9"
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      GROQ_API_KEY: "${GROQ_API_KEY}"
+      AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      USE_LAMBDA: "${USE_LAMBDA:-true}"
+    healthcheck:
+      test: ["CMD","curl","-f","http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    profiles:
+      - dev
+  lambda-packager:
+    build:
+      context: .
+      dockerfile: Dockerfile.lambda
+    profiles:
+      - lambda
+volumes:
+  qdrant_data:

@@ -1,0 +1,14 @@
+boto3
+qdrant-client
+pymupdf==1.24.11
+beautifulsoup4
+requests
+python-dotenv
+langchain
+langchain-groq
+langchain-text-splitters
+cloudscraper
+langchain-core
+rank-bm25
+pydantic
+numpy

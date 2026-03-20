@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+__pycache__/
+.pytest_cache/
+data/
+qdrant_storage/
+*.pyc
+lambda_function.zip
+.rag_pipeline
+awscliv2.zip
+aws

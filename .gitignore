@@ -4,3 +4,5 @@ data
 qdrant_storage
 .env
 .bruno(rag)
+awscliv2.zip
+aws
