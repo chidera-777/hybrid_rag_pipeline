@@ -7,6 +7,7 @@ sys.path.insert(0, '/opt/python')
 sys.path.insert(0, os.path.dirname(__file__))
 
 from mlops.build_index import IndexBuilder
+from mlops.pipeline import MLOpsPipeline
 
 def get_secrets():
     """Fetch secrets from AWS Secrets Manager"""
@@ -23,7 +24,8 @@ def handler(event, context):
         os.environ[key] = value
     
     try:
-        builder = IndexBuilder()
+        mlops = MLOpsPipeline()
+        builder = IndexBuilder(mlops=mlops)
         builder.build_index(tenant_id)
         
         return {

@@ -10,11 +10,12 @@ dotenv.load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class StorageManager:
-    def __init__(self, service_bucket: str = f"rag-pipeline-storage-{os.getenv('ACCOUNT_ID')}"):
+    def __init__(self, service_bucket: str = None):
         self.s3 = boto3.client("s3")
         self.iam = boto3.client("iam")
-        self.service_bucket = service_bucket
-        self._ensure_bucket_exists()
+        self.service_bucket = service_bucket or f"rag-pipeline-storage-{os.getenv('ACCOUNT_ID')}"
+        if not os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+            self._ensure_bucket_exists()
         
     def _ensure_bucket_exists(self):
         try:
