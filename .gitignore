@@ -6,3 +6,6 @@ qdrant_storage
 .bruno(rag)
 awscliv2.zip
 aws
+*.json
+config.py
+run_eval.py
