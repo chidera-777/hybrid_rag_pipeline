@@ -1,10 +1,22 @@
 from fastapi import APIRouter, HTTPException, Depends
 from api.auth import authenticate_tenant
-from api.pipeline_helper import get_tenant_pipeline
-from api.app_state import get_app_state
 from schemas.tool import ToolRegistrationRequest, ToolRegistrationResponse, ToolListResponse
+from agent.tools import ToolRegistry, ToolMode
 
 tool_router = APIRouter(prefix="/api/tenant/tools", tags=["Tool Management"])
+
+_tenant_tool_registries = {}
+
+
+def get_tool_registry(tenant_id: str, mode: str = "strict"):
+    """Get or create tool registry for tenant."""
+    cache_key = f"{tenant_id}_{mode}"
+    
+    if cache_key not in _tenant_tool_registries:
+        tool_mode = ToolMode.STRICT if mode == "strict" else ToolMode.RELAXED
+        _tenant_tool_registries[cache_key] = ToolRegistry(mode=tool_mode)
+    
+    return _tenant_tool_registries[cache_key]
 
 
 @tool_router.post("/register", response_model=ToolRegistrationResponse)
@@ -33,25 +45,9 @@ async def register_custom_tool(tool: ToolRegistrationRequest, tenant: dict = Dep
     }
     """
     try:
-        app_state = get_app_state()
-        if not app_state:
-            raise HTTPException(status_code=500, detail="App state not initialized")
+        registry = get_tool_registry(tenant["tenant_id"])
         
-        pipeline = get_tenant_pipeline(
-            tenant=tenant,
-            embedder=app_state['embedder'],
-            reranker=app_state['reranker'],
-            generator=app_state['generator'],
-            enable_agent=True
-        )
-        
-        if not pipeline.tool_registry:
-            raise HTTPException(
-                status_code=400,
-                detail="Tool registry not available. Enable agent mode first."
-            )
-        
-        pipeline.tool_registry.register_custom_tool(
+        registry.register_custom_tool(
             name=tool.name,
             description=tool.description,
             faithful=tool.faithful,
@@ -90,28 +86,9 @@ async def list_tools(tenant: dict = Depends(authenticate_tenant), mode: str = "s
     - ToolListResponse: The response containing the tools, faithful count, and unfaithful count.
     """
     try:
-        app_state = get_app_state()
-        if not app_state:
-            raise HTTPException(status_code=500, detail="App state not initialized")
+        registry = get_tool_registry(tenant["tenant_id"], mode)
         
-        pipeline = get_tenant_pipeline(
-            tenant=tenant,
-            embedder=app_state['embedder'],
-            reranker=app_state['reranker'],
-            generator=app_state['generator'],
-            enable_agent=True,
-            tool_mode=mode
-        )
-        
-        if not pipeline.tool_registry:
-            return ToolListResponse(
-                mode=mode,
-                tools=[],
-                faithful_count=0,
-                unfaithful_count=0
-            )
-        
-        all_tools = pipeline.tool_registry.list_tools()
+        all_tools = registry.list_tools()
         available_tools = [t for t in all_tools if mode == "relaxed" or t["faithful"]]
         
         faithful_count = sum(1 for t in all_tools if t["faithful"])
@@ -143,31 +120,15 @@ async def unregister_tool(tool_name: str, tenant: dict = Depends(authenticate_te
     - dict: A dictionary containing the message and tool name.
     """
     try:
-        app_state = get_app_state()
-        if not app_state:
-            raise HTTPException(status_code=500, detail="App state not initialized")
-        
         if tool_name in ["retrieve", "web_search", "calculator"]:
             raise HTTPException(
                 status_code=400,
                 detail=f"Cannot unregister built-in tool '{tool_name}'"
             )
         
-        pipeline = get_tenant_pipeline(
-            tenant=tenant,
-            embedder=app_state['embedder'],
-            reranker=app_state['reranker'],
-            generator=app_state['generator'],
-            enable_agent=True
-        )
+        registry = get_tool_registry(tenant["tenant_id"])
         
-        if not pipeline.tool_registry:
-            raise HTTPException(
-                status_code=400,
-                detail="Tool registry not available"
-            )
-        
-        success = pipeline.tool_registry.unregister_tool(tool_name)
+        success = registry.unregister_tool(tool_name)
         
         if not success:
             raise HTTPException(

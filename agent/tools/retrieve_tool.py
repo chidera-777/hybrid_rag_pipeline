@@ -58,9 +58,9 @@ class RetrieveTool(BaseTool):
             
             # Rerank
             if rag_pipeline.use_diversity:
-                top_chunks = rag_pipeline.reranker.rerank_with_diversity(input_data, fused_chunks, top_k=5)
+                top_chunks = rag_pipeline.reranker.rerank_with_diversity(input_data, fused_chunks, top_k=3)
             else:
-                top_chunks = rag_pipeline.reranker.rerank(input_data, fused_chunks, top_k=5)
+                top_chunks = rag_pipeline.reranker.rerank(input_data, fused_chunks, top_k=3)
                 if top_chunks and isinstance(top_chunks[0], tuple):
                     top_chunks = [chunk for chunk, _ in top_chunks]
             

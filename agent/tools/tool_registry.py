@@ -156,11 +156,11 @@ class ToolRegistry:
         self.mode = mode
         logger.info(f"Tool mode changed to: {mode.value}")
     
-    def list_tools(self) -> List[Dict[str, Any]]:
+    def list_tools(self):
         """List all registered tools with their properties."""
         return [tool.to_dict() for tool in self.tools.values()]
     
-    def unregister_tool(self, name: str) -> bool:
+    def unregister_tool(self, name: str):
         """Unregister a tool."""
         if name in self.tools:
             del self.tools[name]

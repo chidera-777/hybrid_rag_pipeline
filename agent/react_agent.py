@@ -38,14 +38,34 @@ class ReActAgent:
         self.llm = llm or ChatGroq(
             api_key=api_key,
             model="llama-3.3-70b-versatile",
-            temperature=0.6
+            temperature=0.6,
+            streaming=True
         )
         self.tool_registry = tool_registry or ToolRegistry(mode=tool_mode)
         self.tool_mode = tool_mode
         self.memory_manager = memory_manager
         self.enable_memory = enable_memory
         
-    def run(self, question: str, return_metadata: bool = False):
+    def run(self, question: str, return_metadata: bool = False, stream: bool = False):
+        """
+        Execute ReAct loop: Thought → Action → Observation → repeat
+        Then generate final answer from accumulated observations only.
+        
+        Args:
+            question: The question to answer
+            return_metadata: Whether to return reasoning trace
+            stream: If True, yields events in real-time. If False, returns complete result.
+        
+        Returns:
+            If stream=False: Dict with answer, sources, iterations, etc.
+            If stream=True: Generator yielding event dicts
+        """
+        if stream:
+            return self._run_streaming(question)
+        
+        return self._run_non_streaming(question, return_metadata)
+    
+    def _run_non_streaming(self, question: str, return_metadata: bool = False):
         """
         Execute ReAct loop: Thought → Action → Observation → repeat
         Then generate final answer from accumulated observations only.
@@ -154,12 +174,7 @@ class ReActAgent:
             self.memory_manager.record_interaction(
                 question=question,
                 answer_summary=answer_summary,
-                successful_docs=successful_docs,
-                metadata={
-                    "iterations": len(reasoning_trace),
-                    "tools_used": [obs["tool"] for obs in observations],
-                    "source_attribution": source_attribution
-                }
+                successful_docs=successful_docs
             )
         
         result = {
@@ -185,6 +200,177 @@ class ReActAgent:
             result["tool_mode"] = self.tool_mode.value
         
         return result
+    
+    def _run_streaming(self, question: str):
+        """
+        Execute ReAct loop with streaming output.
+        Yields events for each reasoning step and answer generation.
+        
+        Yields:
+            Dict events with types:
+            - {"type": "reasoning", "iteration": 1, "thought": "...", "action": "...", "observation": "..."}
+            - {"type": "answer_start", "model": "llama-3.3-70b"}
+            - {"type": "answer_chunk", "content": "token"}
+            - {"type": "answer_complete", "sources": [...], "iterations": 3}
+        """
+        observations = []
+        all_chunks = []
+        chunk_ids_seen = set()
+        source_attribution = {"faithful": [], "unfaithful": []}
+        history = ""
+        iteration_count = 0
+        
+        for iteration in range(1, self.max_iterations + 1):
+            iteration_count = iteration
+            
+            thought, action, action_input = self._reason(question, history)
+            
+            if action == "finish":
+                break
+            
+            tool_result = self.tool_registry.execute_tool(
+                tool_name=action,
+                input_data=action_input,
+                context={"rag_pipeline": self.rag_pipeline}
+            )
+            
+            observation_text = tool_result.output if tool_result.success else f"Error: {tool_result.error}"
+            
+            # Stream reasoning step
+            yield {
+                "type": "reasoning",
+                "iteration": iteration,
+                "thought": thought,
+                "action": action,
+                "action_input": action_input,
+                "observation": observation_text[:200] + "..." if len(observation_text) > 200 else observation_text
+            }
+            
+            if not tool_result.success:
+                history += f"\nIteration {iteration}:\nThought: {thought}\nAction: {action}\nAction Input: {action_input}\nObservation: Error - {tool_result.error}\n"
+                continue
+            
+            is_faithful = tool_result.metadata.get("faithful", True)
+            if is_faithful:
+                source_attribution["faithful"].append(action)
+            else:
+                source_attribution["unfaithful"].append(action)
+            
+            if action == "retrieve" and tool_result.metadata and "chunks" in tool_result.metadata:
+                chunks_data = tool_result.metadata["chunks"]
+                new_chunks = []
+                for chunk_data in chunks_data:
+                    chunk = Document(
+                        content=chunk_data["content"],
+                        metadata=chunk_data["metadata"]
+                    )
+                    chunk_id = chunk.metadata.get("chunk_id", chunk.content_hash)
+                    if chunk_id not in chunk_ids_seen:
+                        chunk_ids_seen.add(chunk_id)
+                        new_chunks.append(chunk)
+                        all_chunks.append(chunk)
+                
+                observations.append({
+                    "iteration": iteration,
+                    "tool": action,
+                    "query": action_input,
+                    "chunks": new_chunks,
+                    "text": tool_result.output,
+                    "faithful": is_faithful
+                })
+            else:
+                observations.append({
+                    "iteration": iteration,
+                    "tool": action,
+                    "query": action_input,
+                    "text": tool_result.output,
+                    "faithful": is_faithful
+                })
+            
+            history += f"\nIteration {iteration}:\nThought: {thought}\nAction: {action}\nAction Input: {action_input}\nObservation: {tool_result.output[:200]}...\n"
+        
+        if not observations:
+            yield {
+                "type": "answer_complete",
+                "answer": "I couldn't retrieve any relevant information to answer your question.",
+                "sources": [],
+                "iterations": iteration_count
+            }
+            return
+        
+        # Stream answer generation
+        yield {"type": "answer_start", "model": "llama-3.3-70b-versatile"}
+        
+        # Generate answer with streaming
+        observations_text = self._build_observations_text(observations, all_chunks)
+        
+        chain = ANSWER_GENERATION_PROMPT | self.llm
+        
+        answer_chunks = []
+        for chunk in chain.stream({
+            "question": question,
+            "observations": observations_text,
+            "mode": self.tool_mode.value,
+            "has_external": any(not obs.get("faithful", True) for obs in observations)
+        }):
+            content = chunk.content if hasattr(chunk, 'content') else str(chunk)
+            if content:
+                answer_chunks.append(content)
+                yield {"type": "answer_chunk", "content": content}
+        
+        full_answer = "".join(answer_chunks)
+        
+        if self.enable_memory and self.memory_manager:
+            answer_summary = self._summarize_answer(full_answer, observations)
+            successful_docs = [chunk.metadata.get("source", "unknown") for chunk in all_chunks]
+            self.memory_manager.record_interaction(
+                question=question,
+                answer_summary=answer_summary,
+                successful_docs=successful_docs
+            )
+        
+        sources = [chunk.metadata for chunk in all_chunks]
+        unfaithful_obs = [obs for obs in observations if not obs.get("faithful", True)]
+        if unfaithful_obs:
+            for obs in unfaithful_obs:
+                sources.append({
+                    "source": f"external_{obs['tool']}",
+                    "tool": obs['tool'],
+                    "faithful": False,
+                    "query": obs['query']
+                })
+        
+        # Final completion event
+        yield {
+            "type": "answer_complete",
+            "sources": sources,
+            "iterations": iteration_count,
+            "source_attribution": source_attribution
+        }
+    
+    def _build_observations_text(self, observations: List[Dict], all_chunks: List[Document]) -> str:
+        """Build observations text for answer generation."""
+        observations_text = ""
+        source_counter = 1
+        chunk_to_source = {}
+        
+        if all_chunks:
+            observations_text += "=== KNOWLEDGE BASE (Faithful Sources) ===\n\n"
+            for chunk in all_chunks:
+                chunk_id = chunk.metadata.get("chunk_id", chunk.content_hash)
+                if chunk_id not in chunk_to_source:
+                    chunk_to_source[chunk_id] = source_counter
+                    observations_text += f"[Source {source_counter}]\n{chunk.content}\n"
+                    observations_text += f"[Metadata] {chunk.metadata}\n\n"
+                    source_counter += 1
+        
+        unfaithful_obs = [obs for obs in observations if not obs.get("faithful", True)]
+        if unfaithful_obs:
+            observations_text += "\n=== EXTERNAL SOURCES (Unfaithful - Not from Knowledge Base) ===\n\n"
+            for obs in unfaithful_obs:
+                observations_text += f"[External Tool: {obs['tool']}]\n{obs['text']}\n\n"
+        
+        return observations_text
     
     def _reason(self, question: str, history: str):
         """

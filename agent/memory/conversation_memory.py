@@ -37,7 +37,7 @@ class ConversationMemory(BaseMemory):
         for item in items:
             entry = MemoryEntry(
                 content=f"Q: {item['question']}\nA: {item['answer_summary']}",
-                timestamp=item['timestamp'],
+                timestamp=str(item['timestamp']),
                 metadata={"type": "turn", "question": item['question']}
             )
             self.conversation_history.append(entry)

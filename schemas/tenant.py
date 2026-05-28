@@ -65,5 +65,4 @@ class AgenticQueryResponse(BaseModel):
     tenant_id: str
     iterations: int
     conversation_id: Optional[str] = None
-    reasoning_trace: Optional[list] = None
     metadata: Optional[dict] = None

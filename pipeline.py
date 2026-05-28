@@ -151,7 +151,7 @@ class RAGPipeline:
         return response
     
     
-    def agentic_query(self, question: str, max_iterations: int = 3, return_metadata: bool = False):
+    def agentic_query(self, question: str, max_iterations: int = 3, return_metadata: bool = False, stream: bool = False):
         """
         Execute agentic query with multi-step reasoning (ReAct).
         
@@ -164,21 +164,37 @@ class RAGPipeline:
             question: The question to answer
             max_iterations: Maximum reasoning iterations (1-5)
             return_metadata: Whether to return reasoning trace
+            stream: If True, returns generator for streaming. If False, returns complete dict.
         
         Returns:
-            Dict with answer, sources, iterations, conversation_id, and optional reasoning trace
+            If stream=False: Dict with answer, sources, iterations, conversation_id, and optional reasoning trace
+            If stream=True: Generator yielding event dicts (conversation_id in final event)
         """
         if not self.enable_agent or not self.agent:
             raise RuntimeError("Agent not enabled. Set enable_agent=True when initializing RAGPipeline")
         
-        start_time = time.time()
         self.agent.max_iterations = max_iterations
-        result = self.agent.run(question, return_metadata=return_metadata)
-        result["latency"] = time.time() - start_time
+        result = self.agent.run(question, return_metadata=return_metadata, stream=stream)
         
-        # Always return conversation_id if memory is enabled
+        if stream:
+            def stream_with_conversation_id():
+                for event in result:
+                    if event.get('type') == 'answer_complete' and self.enable_memory and self.conversation_id:
+                        event['conversation_id'] = self.conversation_id
+                    yield event
+            return stream_with_conversation_id()
+        
+        # Non-streaming: add conversation_id to result
         if self.enable_memory and self.conversation_id:
             result["conversation_id"] = self.conversation_id
+            
+        if return_metadata:
+            result["metadata"] = {
+                "reasoning_trace": result.get("reasoning_trace"),
+                "observations": result.get("observations"),
+                "tool_mode": result.get("tool_mode"),
+                "total_chunks_retrieved": result.get("total_chunks_retrieved")
+            }
         
         return result
     

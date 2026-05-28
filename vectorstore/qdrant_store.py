@@ -145,7 +145,7 @@ class QdrantStore:
         }
     
     
-    def query(self, query_text, top_k=7):
+    def query(self, query_text, top_k=5):
         query_vector = self.embedder.encode([query_text]).tolist()[0]
         results = self.client.query_points(
             collection_name=self.collection_name,

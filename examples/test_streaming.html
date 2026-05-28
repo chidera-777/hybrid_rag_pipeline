@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic RAG Streaming Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .config {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .config input, .config select {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0 15px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .config label {
+            font-weight: bold;
+            color: #555;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .reasoning {
+            background: #e3f2fd;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #2196F3;
+            border-radius: 4px;
+        }
+        .reasoning h3 {
+            margin: 0 0 10px 0;
+            color: #1976D2;
+        }
+        .reasoning p {
+            margin: 5px 0;
+            color: #555;
+        }
+        .answer-section {
+            margin-top: 30px;
+        }
+        .answer-section h2 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+        .answer {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            line-height: 1.6;
+            min-height: 100px;
+            white-space: pre-wrap;
+        }
+        .cursor {
+            animation: blink 1s infinite;
+            font-weight: bold;
+        }
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .metadata {
+            background: #fff3cd;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Agentic RAG Streaming Test</h1>
+        
+        <div class="config">
+            <label>API URL:</label>
+            <input type="text" id="apiUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
+            
+            <label>API Key:</label>
+            <input type="text" id="apiKey" placeholder="rsk_your_api_key_here">
+            
+            <label>Question:</label>
+            <input type="text" id="question" value="What are the main features of the product?" placeholder="Enter your question">
+            
+            <label>Max Iterations:</label>
+            <input type="number" id="maxIterations" value="3" min="1" max="5">
+            
+            <label>Tool Mode:</label>
+            <select id="toolMode">
+                <option value="strict">Strict (KB only)</option>
+                <option value="relaxed">Relaxed (All tools)</option>
+            </select>
+        </div>
+        
+        <button onclick="startStreaming()" id="startBtn">▶️ Start Streaming Query</button>
+        <button onclick="startNonStreaming()" id="nonStreamBtn">📄 Non-Streaming Query</button>
+        <button onclick="clearResults()" id="clearBtn">🗑️ Clear</button>
+        
+        <div id="status"></div>
+        
+        <div id="reasoning-container"></div>
+        
+        <div class="answer-section" id="answer-section" style="display:none;">
+            <h2>📝 Answer:</h2>
+            <div class="answer" id="answer"></div>
+        </div>
+        
+        <div id="metadata"></div>
+    </div>
+
+    <script>
+        let isStreaming = false;
+
+        function clearResults() {
+            document.getElementById('reasoning-container').innerHTML = '';
+            document.getElementById('answer').innerHTML = '';
+            document.getElementById('answer-section').style.display = 'none';
+            document.getElementById('status').innerHTML = '';
+            document.getElementById('metadata').innerHTML = '';
+        }
+
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+        }
+
+        function addReasoning(iteration, thought, action, actionInput, observation) {
+            const container = document.getElementById('reasoning-container');
+            const div = document.createElement('div');
+            div.className = 'reasoning';
+            div.innerHTML = `
+                <h3>🔄 Iteration ${iteration}</h3>
+                <p><strong>💭 Thought:</strong> ${thought}</p>
+                <p><strong>🔧 Action:</strong> ${action}(${actionInput})</p>
+                <p><strong>👁️ Observation:</strong> ${observation}</p>
+            `;
+            container.appendChild(div);
+        }
+
+        async function startStreaming() {
+            if (isStreaming) return;
+            
+            clearResults();
+            isStreaming = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('nonStreamBtn').disabled = true;
+            
+            const apiUrl = document.getElementById('apiUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            const question = document.getElementById('question').value;
+            const maxIterations = document.getElementById('maxIterations').value;
+            const toolMode = document.getElementById('toolMode').value;
+            
+            if (!apiKey) {
+                showStatus('Please enter your API key', 'error');
+                isStreaming = false;
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('nonStreamBtn').disabled = false;
+                return;
+            }
+            
+            showStatus('🚀 Starting streaming query...', 'info');
+            
+            const formData = new FormData();
+            formData.append('request', JSON.stringify({
+                question: question,
+                max_iterations: parseInt(maxIterations),
+                tool_mode: toolMode
+            }));
+            
+            try {
+                const response = await fetch(`${apiUrl}/api/query/agentic?stream=true`, {
+                    method: 'POST',
+                    headers: {
+                        'X-API-Key': apiKey
+                    },
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                showStatus('📡 Receiving events...', 'info');
+                
+                function read() {
+                    reader.read().then(({ done, value }) => {
+                        if (done) {
+                            showStatus('✅ Stream complete!', 'success');
+                            isStreaming = false;
+                            document.getElementById('startBtn').disabled = false;
+                            document.getElementById('nonStreamBtn').disabled = false;
+                            return;
+                        }
+                        
+                        const text = decoder.decode(value);
+                        const lines = text.split('\n');
+                        
+                        lines.forEach(line => {
+                            if (line.startsWith('data: ')) {
+                                const event = JSON.parse(line.slice(6));
+                                
+                                if (event.type === 'reasoning') {
+                                    addReasoning(
+                                        event.iteration,
+                                        event.thought,
+                                        event.action,
+                                        event.action_input,
+                                        event.observation
+                                    );
+                                } else if (event.type === 'answer_start') {
+                                    document.getElementById('answer-section').style.display = 'block';
+                                    document.getElementById('answer').innerHTML = '<span class="cursor">▊</span>';
+                                } else if (event.type === 'answer_chunk') {
+                                    const answerDiv = document.getElementById('answer');
+                                    const cursor = answerDiv.querySelector('.cursor');
+                                    if (cursor) {
+                                        cursor.remove();
+                                    }
+                                    answerDiv.textContent += event.content;
+                                    answerDiv.innerHTML += '<span class="cursor">▊</span>';
+                                } else if (event.type === 'answer_complete') {
+                                    const answerDiv = document.getElementById('answer');
+                                    const cursor = answerDiv.querySelector('.cursor');
+                                    if (cursor) {
+                                        cursor.remove();
+                                    }
+                                    
+                                    const metadataDiv = document.getElementById('metadata');
+                                    metadataDiv.className = 'metadata';
+                                    metadataDiv.innerHTML = `
+                                        <strong>📊 Metadata:</strong><br>
+                                        Iterations: ${event.iterations}<br>
+                                        Sources: ${event.sources.length} documents<br>
+                                        Faithful tools: ${event.source_attribution?.faithful?.join(', ') || 'None'}<br>
+                                        External tools: ${event.source_attribution?.unfaithful?.join(', ') || 'None'}<br>
+                                        Conversation ID: ${event.conversation_id || 'None'}<br>
+                                    `;
+                                } else if (event.type === 'complete') {
+                                    const metadataDiv = document.getElementById('metadata');
+                                    metadataDiv.innerHTML += `<br>⏱️ Latency: ${event.latency} seconds`;
+                                } else if (event.type === 'error') {
+                                    showStatus(`❌ Error: ${event.error}`, 'error');
+                                }
+                            }
+                        });
+                        
+                        read();
+                    });
+                }
+                
+                read();
+                
+            } catch (error) {
+                showStatus(`❌ Error: ${error.message}`, 'error');
+                isStreaming = false;
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('nonStreamBtn').disabled = false;
+            }
+        }
+
+        async function startNonStreaming() {
+            clearResults();
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('nonStreamBtn').disabled = true;
+            
+            const apiUrl = document.getElementById('apiUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            const question = document.getElementById('question').value;
+            const maxIterations = document.getElementById('maxIterations').value;
+            const toolMode = document.getElementById('toolMode').value;
+            
+            if (!apiKey) {
+                showStatus('Please enter your API key', 'error');
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('nonStreamBtn').disabled = false;
+                return;
+            }
+            
+            showStatus('⏳ Executing non-streaming query...', 'info');
+            
+            const formData = new FormData();
+            formData.append('request', JSON.stringify({
+                question: question,
+                max_iterations: parseInt(maxIterations),
+                tool_mode: toolMode,
+                return_metadata: true
+            }));
+            
+            try {
+                const response = await fetch(`${apiUrl}/api/query/agentic`, {
+                    method: 'POST',
+                    headers: {
+                        'X-API-Key': apiKey
+                    },
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                
+                showStatus('✅ Query complete!', 'success');
+                
+                document.getElementById('answer-section').style.display = 'block';
+                document.getElementById('answer').textContent = result.answer;
+                
+                const metadataDiv = document.getElementById('metadata');
+                metadataDiv.className = 'metadata';
+                metadataDiv.innerHTML = `
+                    <strong>📊 Metadata:</strong><br>
+                    Iterations: ${result.iterations}<br>
+                    Sources: ${result.sources.length} documents<br>
+                    Latency: ${result.latency} seconds<br>
+                    Model: ${result.model}
+                `;
+                
+            } catch (error) {
+                showStatus(`❌ Error: ${error.message}`, 'error');
+            } finally {
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('nonStreamBtn').disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

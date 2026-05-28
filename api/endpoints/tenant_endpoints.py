@@ -4,6 +4,7 @@ from api.pipeline_helper import tenant_pipelines
 from mlops.pipeline import MLOpsPipeline
 from mlops.storage_manager import StorageManager
 from schemas.tenant import TenantRegisteration, TenantConfig, TenantResponse
+from datetime import datetime, timedelta
 import secrets
 import uuid
 import yaml
@@ -227,6 +228,55 @@ async def rotate_tenant_credentials(tenant: dict = Depends(authenticate_tenant))
         )
 
 
+@tenant_router.put("/config", response_model=dict)
+async def update_tenant_config(config_file: UploadFile = File(...), tenant: dict = Depends(authenticate_tenant)):
+    """
+    Update tenant configuration (Qdrant URL, API key, collection name).
+    
+    Parameters:
+    - x-api-key (str[header]): The API key of the tenant (passed in the header).
+    - config_file (UploadFile): YAML or JSON file containing the updated tenant configuration.
+    
+    Returns:
+    - dict: A dictionary containing the success message and updated configuration.
+    """
+    try:
+        contents = await config_file.read()
+        if config_file.filename.endswith((".yaml", ".yml")):
+            config_dict = yaml.safe_load(contents)
+        elif config_file.filename.endswith(".json"):
+            config_dict = json.loads(contents)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid config file format (must be .yaml or .json)")
+        
+        tenant_config = TenantConfig(**config_dict)
+        mlops.validate_tenant_config(config_dict)
+        
+        mlops.tenants_table.update_item(
+            Key={'tenant_id': tenant['tenant_id']},
+            UpdateExpression='SET config = :config',
+            ExpressionAttributeValues={
+                ':config': json.dumps(config_dict)
+            }
+        )
+        
+        keys_to_delete = [k for k in tenant_pipelines.keys() if k.startswith(tenant['tenant_id'])]
+        for key in keys_to_delete:
+            del tenant_pipelines[key]
+        
+        return {
+            "message": "Configuration updated successfully",
+            "tenant_id": tenant['tenant_id'],
+            "updated_config": config_dict,
+            "note": "Pipeline cache cleared. New configuration will be used on next query."
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update configuration: {str(e)}"
+        )
+
+
 @tenant_router.delete("")
 async def delete_tenant(tenant: dict = Depends(authenticate_tenant)):
     """
@@ -272,7 +322,6 @@ async def get_tenant_metrics(tenant: dict = Depends(authenticate_tenant), hours:
     Returns:
     - dict: A dictionary containing the metrics for the tenant.
     """
-    from datetime import datetime, timedelta
     end = datetime.now()
     start = end - timedelta(hours=hours)
     ns = "RAG-as-a-Service"

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Form
+from fastapi.responses import StreamingResponse
 from api.auth import require_tenant_ready
 from api.pipeline_helper import get_tenant_pipeline
 from api.app_state import get_app_state
@@ -70,8 +71,8 @@ async def query(request: str = Form(...), tenant: dict = Depends(require_tenant_
         )
 
 
-@query_router.post("/query/agentic", response_model=AgenticQueryResponse)
-async def agentic_query(request: str = Form(...), tenant: dict = Depends(require_tenant_ready)):
+@query_router.post("/query/agentic")
+async def agentic_query(request: str = Form(...), tenant: dict = Depends(require_tenant_ready), stream: bool = False):
     """
     Query using multi-step agentic reasoning (ReAct) with tools.
     The agent will:
@@ -82,18 +83,31 @@ async def agentic_query(request: str = Form(...), tenant: dict = Depends(require
     Parameters:
     - x-api-key (str[header]): The API key of the tenant (passed in the header).
     - request (str): JSON string containing the agentic query request. See example below.
+    - stream (bool[query_param]): If true, returns Server-Sent Events stream. Default: false.
+    
+    ### Note: 
     - Setting tool_mode to "relaxed" will allow the agent to use external tools (web_search, calculator, etc.), default is "strict".
+    - Setting return_metadata to true will return the reasoning trace, default is false.
+    - max_iteration is the maximum number of iterations the agent will run, default is 3.
+    - Setting stream=true will stream reasoning steps and answer generation in real-time.
+    - The response will include a conversation_id if the agent is enabled and memory is enabled for new conversations, making the field an optional field, therefore, subsequent queries with the same conversation_id will continue the conversation. How to use the conversation_id is described in the example below.
     
     Returns:
-    - AgenticQueryResponse: The response containing answer, sources, iterations, and optional reasoning trace.
+    - AgenticQueryResponse (if stream=false): JSON response with answer, sources, iterations
+    - StreamingResponse (if stream=true): Server-Sent Events with real-time updates
     
-    Example:
+    Example (non-streaming):
     - request = {
         "question": "What are the pricing tiers and what features does each include?",
         "max_iterations": 3,
-        "return_metadata": true
-        "tool_mode": "strict"
+        "return_metadata": true,
+        "tool_mode": "strict",
+        "conversation_id": "1234567890"
     }
+    
+    Example (streaming):
+    - Same request with ?stream=true query parameter
+    - Returns SSE events: reasoning, answer_chunk, answer_complete, complete
     """
     try:
         app_state = get_app_state()
@@ -102,7 +116,6 @@ async def agentic_query(request: str = Form(...), tenant: dict = Depends(require
         
         request_dict = json.loads(request) if isinstance(request, str) else request
         request = AgenticQueryRequest(**request_dict)
-        start_time = time.time()
         
         tool_mode = getattr(request, 'tool_mode', 'strict')
         conversation_id = getattr(request, 'conversation_id', None)
@@ -117,6 +130,59 @@ async def agentic_query(request: str = Form(...), tenant: dict = Depends(require
             enable_memory=True,
             conversation_id=conversation_id
         )
+        
+        # Streaming mode
+        if stream:
+            def sync_event_generator():
+                start_time = time.time()
+                conversation_id_captured = None
+                
+                try:
+                    # Stream events as they come
+                    for event in pipeline.agentic_query(
+                        question=request.question,
+                        max_iterations=request.max_iterations or 3,
+                        stream=True
+                    ):
+                        if event.get('type') == 'answer_complete' and 'conversation_id' in event:
+                            conversation_id_captured = event['conversation_id']
+                        
+                        yield f"data: {json.dumps(event)}\n\n"
+                    
+                    latency = time.time() - start_time
+                    mlops.log_query_metrics(
+                        tenant_id=tenant["tenant_id"],
+                        latency=latency,
+                        tokens_used=0,
+                    )
+                    
+                    completion_event = {
+                        "type": "complete",
+                        "latency": round(latency, 2),
+                        "tenant_id": tenant["tenant_id"]
+                    }
+                    
+                    if conversation_id_captured:
+                        completion_event["conversation_id"] = conversation_id_captured
+                    
+                    yield f"data: {json.dumps(completion_event)}\n\n"
+                    
+                except Exception as e:
+                    error_event = {"type": "error", "error": str(e)}
+                    yield f"data: {json.dumps(error_event)}\n\n"
+            
+            return StreamingResponse(
+                sync_event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+        
+        # Non-streaming mode
+        start_time = time.time()
         
         response = pipeline.agentic_query(
             question=request.question,
@@ -139,7 +205,6 @@ async def agentic_query(request: str = Form(...), tenant: dict = Depends(require
             tenant_id=tenant["tenant_id"],
             iterations=response["iterations"],
             conversation_id=response.get("conversation_id"),
-            reasoning_trace=response.get("reasoning_trace", None),
             metadata=response.get("metadata", [])
         )
     except Exception as e:
