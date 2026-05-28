@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Form
+from fastapi import APIRouter, HTTPException, Depends, Body
 from fastapi.responses import StreamingResponse
 from api.auth import require_tenant_ready
 from api.pipeline_helper import get_tenant_pipeline
@@ -14,13 +14,13 @@ mlops = MLOpsPipeline()
 
 
 @query_router.post("/query", response_model=QueryResponse)
-async def query(request: str = Form(...), tenant: dict = Depends(require_tenant_ready)):
+async def query(request: QueryRequest = Body(...), tenant: dict = Depends(require_tenant_ready)):
     """
     Query the index for a tenant.
     
     Parameters:
     - x-api-key (str[header]): The API key of the tenant (passed in the header).
-    - request (str): JSON string containing the query request. Return metadata is optional (default: false). See example below.
+    - request (QueryRequest): The query request containing the question and optional metadata flag. See example below.
     
     Returns:
     - QueryResponse: The response containing the answer, sources, model, latency, and tenant ID.
@@ -36,8 +36,6 @@ async def query(request: str = Form(...), tenant: dict = Depends(require_tenant_
         if not app_state:
             raise HTTPException(status_code=500, detail="App state not initialized")
         
-        request_dict = json.loads(request) if isinstance(request, str) else request
-        request = QueryRequest(**request_dict)
         start_time = time.time()
         pipeline = get_tenant_pipeline(
             tenant=tenant,
@@ -72,7 +70,7 @@ async def query(request: str = Form(...), tenant: dict = Depends(require_tenant_
 
 
 @query_router.post("/query/agentic")
-async def agentic_query(request: str = Form(...), tenant: dict = Depends(require_tenant_ready), stream: bool = False):
+async def agentic_query(request: AgenticQueryRequest = Body(...), tenant: dict = Depends(require_tenant_ready), stream: bool = False):
     """
     Query using multi-step agentic reasoning (ReAct) with tools.
     The agent will:
@@ -82,7 +80,7 @@ async def agentic_query(request: str = Form(...), tenant: dict = Depends(require
     
     Parameters:
     - x-api-key (str[header]): The API key of the tenant (passed in the header).
-    - request (str): JSON string containing the agentic query request. See example below.
+    - request (AgenticQueryRequest): The agentic query request containing question, max_iterations, tool_mode, etc. See example below.
     - stream (bool[query_param]): If true, returns Server-Sent Events stream. Default: false.
     
     ### Note: 
@@ -113,9 +111,6 @@ async def agentic_query(request: str = Form(...), tenant: dict = Depends(require
         app_state = get_app_state()
         if not app_state:
             raise HTTPException(status_code=500, detail="App state not initialized")
-        
-        request_dict = json.loads(request) if isinstance(request, str) else request
-        request = AgenticQueryRequest(**request_dict)
         
         tool_mode = getattr(request, 'tool_mode', 'strict')
         conversation_id = getattr(request, 'conversation_id', None)

@@ -3,6 +3,9 @@ import pymupdf
 from pathlib import Path
 from .base_loader import Document, BaseLoader
 from .chunker import Chunker
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class PDFLoader(BaseLoader):
     def __init__(self):
@@ -60,11 +63,11 @@ class PDFLoader(BaseLoader):
         pdf_files = list(Path(directory).glob("*pdf"))
         
         if not pdf_files:
-            print(f"No PDF files found in {directory}.")
+            logging.info(f"No PDF files found in {directory}.")
             return []
 
         for pdf_path in pdf_files:
-            print(f"Loading PDF-{pdf_path.name}")
+            logging.info(f"Loading PDF-{pdf_path.name}")
             chunks = self.load(str(pdf_path))
             all_chunks.extend(chunks)
 

@@ -13,6 +13,24 @@ class ToolRegistrationRequest(BaseModel):
     method: Literal["POST", "GET"] = Field("POST", description="HTTP method")
     headers: Optional[Dict[str, str]] = Field(None, description="Optional HTTP headers")
     auth_token: Optional[str] = Field(None, description="Optional bearer token for authentication")
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "name": "weather_check",
+                    "description": "Get current weather conditions and forecasts for any location. Use when users ask about weather.",
+                    "faithful": False,
+                    "endpoint_url": "https://api.weather.com/v1/current",
+                    "method": "GET",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "auth_token": "your-weather-api-token"
+                }
+            ]
+        }
+    }
 
 
 class ToolRegistrationResponse(BaseModel):

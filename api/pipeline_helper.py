@@ -1,5 +1,6 @@
 from pipeline import RAGPipeline
 from typing import Optional
+from api.endpoints.tool_endpoints import get_tool_registry
 
 tenant_pipelines = {}
 
@@ -41,6 +42,9 @@ def get_tenant_pipeline(
     if cache_key not in tenant_pipelines:
         config = tenant["config"]
         
+        # Get shared tool registry for this tenant
+        tool_registry = get_tool_registry(tenant_id, tool_mode) if enable_agent else None
+        
         pipeline = RAGPipeline(
             qdrant_url=config["QDRANT_URL"],
             qdrant_api_key=config["QDRANT_API_KEY"],
@@ -51,7 +55,8 @@ def get_tenant_pipeline(
             enable_agent=enable_agent,
             tool_mode=tool_mode,
             enable_memory=enable_memory,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            tool_registry=tool_registry
         )
         tenant_pipelines[cache_key] = pipeline
     

@@ -1,26 +1,45 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from api.auth import authenticate_tenant
 from schemas.tool import ToolRegistrationRequest, ToolRegistrationResponse, ToolListResponse
 from agent.tools import ToolRegistry, ToolMode
+from agent.tools.tool_store import ToolStore
 
 tool_router = APIRouter(prefix="/api/tenant/tools", tags=["Tool Management"])
 
 _tenant_tool_registries = {}
+_tool_store = ToolStore()
 
 
 def get_tool_registry(tenant_id: str, mode: str = "strict"):
-    """Get or create tool registry for tenant."""
-    cache_key = f"{tenant_id}_{mode}"
-    
-    if cache_key not in _tenant_tool_registries:
+    """Get or create tool registry for tenant, loading custom tools from DynamoDB."""
+    if tenant_id not in _tenant_tool_registries:
         tool_mode = ToolMode.STRICT if mode == "strict" else ToolMode.RELAXED
-        _tenant_tool_registries[cache_key] = ToolRegistry(mode=tool_mode)
+        registry = ToolRegistry(mode=tool_mode)
+        
+        custom_tools = _tool_store.list_tools(tenant_id)
+        for tool in custom_tools:
+            registry.register_custom_tool(
+                name=tool['tool_name'],
+                description=tool['description'],
+                faithful=tool['faithful'],
+                endpoint_url=tool['endpoint_url'],
+                method=tool['method'],
+                headers=tool.get('headers'),
+                auth_token=tool.get('auth_token')
+            )
+        
+        _tenant_tool_registries[tenant_id] = registry
     
-    return _tenant_tool_registries[cache_key]
+    # Update mode if different
+    registry = _tenant_tool_registries[tenant_id]
+    tool_mode = ToolMode.STRICT if mode == "strict" else ToolMode.RELAXED
+    registry.set_mode(tool_mode)
+    
+    return registry
 
 
 @tool_router.post("/register", response_model=ToolRegistrationResponse)
-async def register_custom_tool(tool: ToolRegistrationRequest, tenant: dict = Depends(authenticate_tenant)):
+async def register_custom_tool(tool: ToolRegistrationRequest = Body(...), tenant: dict = Depends(authenticate_tenant)):
     """
     Register a custom tool for your tenant.
     
@@ -45,8 +64,34 @@ async def register_custom_tool(tool: ToolRegistrationRequest, tenant: dict = Dep
     }
     """
     try:
-        registry = get_tool_registry(tenant["tenant_id"])
+        tenant_id = tenant["tenant_id"]
         
+        # Check if tool already exists
+        existing_tool = _tool_store.get_tool(tenant_id, tool.name)
+        if existing_tool:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tool '{tool.name}' is already registered. Please unregister it first or use a different name."
+            )
+        
+        # Check if it's a built-in tool name
+        if tool.name in ["retrieve", "web_search", "calculator"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot register tool with reserved name '{tool.name}'. This is a built-in tool."
+            )
+        
+        _tool_store.save_tool(
+            tenant_id=tenant_id,
+            tool_name=tool.name,
+            description=tool.description,
+            faithful=tool.faithful,
+            endpoint_url=str(tool.endpoint_url),
+            method=tool.method,
+            headers=tool.headers,
+            auth_token=tool.auth_token
+        )
+        registry = get_tool_registry(tenant_id)
         registry.register_custom_tool(
             name=tool.name,
             description=tool.description,
@@ -126,8 +171,11 @@ async def unregister_tool(tool_name: str, tenant: dict = Depends(authenticate_te
                 detail=f"Cannot unregister built-in tool '{tool_name}'"
             )
         
-        registry = get_tool_registry(tenant["tenant_id"])
+        tenant_id = tenant["tenant_id"]
         
+        _tool_store.delete_tool(tenant_id, tool_name)
+        
+        registry = get_tool_registry(tenant_id)
         success = registry.unregister_tool(tool_name)
         
         if not success:

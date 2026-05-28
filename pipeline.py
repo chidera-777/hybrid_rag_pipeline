@@ -30,7 +30,8 @@ class RAGPipeline:
         enable_agent: bool = False,
         tool_mode: str = "strict",
         enable_memory: bool = False,
-        conversation_id: Optional[str] = None
+        conversation_id: Optional[str] = None,
+        tool_registry: Optional[ToolRegistry] = None
     ):
         hf_logging.set_verbosity_error()
         hf_logging.disable_progress_bar()
@@ -60,7 +61,8 @@ class RAGPipeline:
         self.tool_registry = None
         self.memory_manager = None
         if enable_agent:
-            self.tool_registry = ToolRegistry(mode=self.tool_mode)
+            # Use provided tool_registry or create new one
+            self.tool_registry = tool_registry or ToolRegistry(mode=self.tool_mode)
             if enable_memory:
                 if not conversation_id:
                     conversation_id = str(uuid.uuid4())
@@ -205,5 +207,5 @@ class RAGPipeline:
             result = self.query(question, return_metadata=return_metadata)
             results.append(result)
             if i % 100 == 0:
-                print(f"Processed {i} questions")
+                logging.info(f"Processed {i} questions")
         return results

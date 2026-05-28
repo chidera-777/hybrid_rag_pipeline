@@ -5,12 +5,15 @@ from sentence_transformers import SentenceTransformer
 from reranker.cross_encoder import Reranker
 from generation.generator import Generator
 from api.app_state import set_app_state
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 @asynccontextmanager
 async def lifespan(app):
-    print("\n" + "="*60)
-    print("RAG-as-a-Service API Starting...")
-    print("="*60 + "\n")
+    logging.info("="*60)
+    logging.info("RAG-as-a-Service API Starting...")
+    logging.info("="*60)
     app.state.embedder = SentenceTransformer("all-MiniLM-L6-v2")
     app.state.reranker = Reranker()
     app.state.generator = Generator()
