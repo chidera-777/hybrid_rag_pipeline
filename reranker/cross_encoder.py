@@ -63,7 +63,7 @@ class Reranker:
         return float(len(intersection)) / (len(word1) + len(word2) - len(intersection))
     
     
-    def batch_rerank(self, queries:List[str], chunks_per_query:List[List], top_k:int=5):
+    def batch_rerank(self, queries:List[str], chunks_per_query:List[List], top_k:int=3):
         all_results = []
         for query, chunk_list in zip(queries, chunks_per_query):
             results = self.rerank(query, chunk_list, top_k=top_k)

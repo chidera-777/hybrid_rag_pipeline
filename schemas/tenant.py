@@ -47,3 +47,22 @@ class QueryResponse(BaseModel):
     latency: float
     tenant_id: str
     metadata: Optional[dict] = None
+
+
+class AgenticQueryRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+    conversation_id: Optional[str] = Field(None, description="Conversation ID to continue existing conversation")
+    max_iterations: Optional[int] = Field(3, ge=1, le=5, description="Maximum reasoning iterations (1-5)")
+    return_metadata: Optional[bool] = Field(False, description="Whether to return reasoning trace")
+    tool_mode: Optional[Literal["strict", "relaxed"]] = Field("strict", description="strict: only faithful tools | relaxed: all tools")
+
+
+class AgenticQueryResponse(BaseModel):
+    answer: str
+    sources: list
+    model: str
+    latency: float
+    tenant_id: str
+    iterations: int
+    conversation_id: Optional[str] = None
+    metadata: Optional[dict] = None

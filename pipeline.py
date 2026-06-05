@@ -10,19 +10,29 @@ from retrieval.hybrid import reciprocal_rank_fusion
 from reranker.cross_encoder import Reranker
 import concurrent.futures
 from generation.generator import Generator
+from agent.react_agent import ReActAgent
+from agent.tools import ToolMode, ToolRegistry
+from agent.memory import MemoryManager
 from config import *
+import uuid
 
 
 class RAGPipeline:
     def __init__(
         self,
+        tenant_id: str,
         qdrant_url: str = "QDRANT_URL",
         qdrant_api_key: str = "QDRANT_API_KEY",
         collection_name: str = "COLLECTION_NAME",
         use_diversity: bool = True,
         embedder: Optional[object] = None,
         reranker: Optional[Reranker] = None,
-        generator: Optional[Generator] = None
+        generator: Optional[Generator] = None,
+        enable_agent: bool = False,
+        tool_mode: str = "strict",
+        enable_memory: bool = False,
+        conversation_id: Optional[str] = None,
+        tool_registry: Optional[ToolRegistry] = None
     ):
         hf_logging.set_verbosity_error()
         hf_logging.disable_progress_bar()
@@ -44,6 +54,35 @@ class RAGPipeline:
         self.sparse_retriever = SparseRetriever(self.chunks)
         self.reranker = reranker or Reranker()
         self.generator = generator or Generator()
+        self.enable_agent = enable_agent
+        self.tool_mode = ToolMode.STRICT if tool_mode == "strict" else ToolMode.RELAXED
+        self.enable_memory = enable_memory
+        self.conversation_id = conversation_id
+        self.tenant_id = tenant_id
+        self.agent = None
+        self.tool_registry = None
+        self.memory_manager = None
+        if enable_agent:
+            # Use provided tool_registry or create new one
+            self.tool_registry = tool_registry or ToolRegistry(mode=self.tool_mode)
+            if enable_memory:
+                if not conversation_id:
+                    conversation_id = str(uuid.uuid4())
+                self.conversation_id = conversation_id
+                self.memory_manager = MemoryManager(
+                    tenant_id=self.tenant_id,
+                    conversation_id=conversation_id,
+                    enable_conversation_memory=True,
+                    enable_pattern_memory=True
+                )
+            self.agent = ReActAgent(
+                rag_pipeline=self,
+                llm=self.generator.llm,
+                tool_mode=self.tool_mode,
+                tool_registry=self.tool_registry,
+                memory_manager=self.memory_manager,
+                enable_memory=enable_memory
+            )
         
         
     def load_all_chunks(self):
@@ -116,11 +155,59 @@ class RAGPipeline:
         return response
     
     
+    def agentic_query(self, question: str, max_iterations: int = 3, return_metadata: bool = False, stream: bool = False):
+        """
+        Execute agentic query with multi-step reasoning (ReAct).
+        
+        The agent will:
+        1. Reason about what information to retrieve (navigation only)
+        2. Retrieve information across multiple iterations
+        3. Generate final answer grounded exclusively in observations
+        
+        Args:
+            question: The question to answer
+            max_iterations: Maximum reasoning iterations (1-5)
+            return_metadata: Whether to return reasoning trace
+            stream: If True, returns generator for streaming. If False, returns complete dict.
+        
+        Returns:
+            If stream=False: Dict with answer, sources, iterations, conversation_id, and optional reasoning trace
+            If stream=True: Generator yielding event dicts (conversation_id in final event)
+        """
+        if not self.enable_agent or not self.agent:
+            raise RuntimeError("Agent not enabled. Set enable_agent=True when initializing RAGPipeline")
+        
+        self.agent.max_iterations = max_iterations
+        result = self.agent.run(question, return_metadata=return_metadata, stream=stream)
+        
+        if stream:
+            def stream_with_conversation_id():
+                for event in result:
+                    if event.get('type') == 'answer_complete' and self.enable_memory and self.conversation_id:
+                        event['conversation_id'] = self.conversation_id
+                    yield event
+            return stream_with_conversation_id()
+        
+        # Non-streaming: add conversation_id to result
+        if self.enable_memory and self.conversation_id:
+            result["conversation_id"] = self.conversation_id
+            
+        if return_metadata:
+            result["metadata"] = {
+                "reasoning_trace": result.get("reasoning_trace"),
+                "observations": result.get("observations"),
+                "tool_mode": result.get("tool_mode"),
+                "total_chunks_retrieved": result.get("total_chunks_retrieved")
+            }
+        
+        return result
+    
+    
     def batch_query(self, questions:List[str], return_metadata:bool=False):
         results = []
         for i, question in enumerate(questions):
             result = self.query(question, return_metadata=return_metadata)
             results.append(result)
             if i % 100 == 0:
-                print(f"Processed {i} questions")
+                logging.info(f"Processed {i} questions")
         return results

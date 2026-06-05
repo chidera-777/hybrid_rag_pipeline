@@ -6,7 +6,7 @@ class SparseRetriever:
         tokenized = [doc.content.split() for doc in documents]
         self.bm25 = BM25Okapi(tokenized)
         
-    def query(self, query_text, top_k=7):
+    def query(self, query_text, top_k=5):
         tokens = query_text.lower().split()
         query_vector = self.bm25.get_scores(tokens)
         top_indices = sorted(range(len(query_vector)), key=lambda i: query_vector[i], reverse=True)[:top_k]

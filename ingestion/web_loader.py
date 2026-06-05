@@ -7,6 +7,9 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from .base_loader import Document, BaseLoader
 from .chunker import Chunker
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Optional selenium imports for JavaScript-heavy sites
 try:
@@ -75,7 +78,7 @@ class WebLoader(BaseLoader):
                 return None
 
         except requests.RequestException as e:
-            print(f"[requests] Failed: {e}")
+            logging.warning(f"[requests] Failed: {e}")
             return None
         
     
@@ -117,7 +120,7 @@ class WebLoader(BaseLoader):
         
         
     def fetch_html(self, url: str):
-        print(f"\nFetching {url}")
+        logging.info(f"Fetching {url}")
         
         html = self.fetch_with_requests(url)
         if html:
@@ -194,7 +197,7 @@ class WebLoader(BaseLoader):
         all_chunks = []
         failed_urls = []
         for url in urls:
-            print(f"Loading URL: {url}")
+            logging.info(f"Loading URL: {url}")
             time.sleep(random.uniform(1, 3))
             chunks = self.load(url)
             if chunks:
