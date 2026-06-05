@@ -49,7 +49,7 @@ class PatternMemory(BaseMemory):
             # Reconstruct pattern entry
             entry = MemoryEntry(
                 content=f"Category: {category} | Query count: {pattern.get('query_count', 0)} | Sources: {', '.join(pattern.get('successful_docs', [])[:3])}",
-                timestamp=pattern.get('last_updated', 0),
+                timestamp=str(pattern.get('last_updated', 0)),
                 metadata={
                     "category": category,
                     "question_snippet": pattern.get('last_question', ''),

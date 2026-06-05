@@ -56,7 +56,8 @@ def get_tenant_pipeline(
             tool_mode=tool_mode,
             enable_memory=enable_memory,
             conversation_id=conversation_id,
-            tool_registry=tool_registry
+            tool_registry=tool_registry,
+            tenant_id=tenant_id
         )
         tenant_pipelines[cache_key] = pipeline
     

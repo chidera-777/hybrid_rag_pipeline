@@ -2,9 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from api.auth import authenticate_tenant
 from schemas.memory import MemoryStatsResponse, MemoryClearRequest, MemoryClearResponse
 from agent.memory.dynamodb_store import DynamoDBMemoryStore
-from api.pipeline_helper import get_tenant_pipeline
-from api.app_state import get_app_state
-import json
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,38 +10,54 @@ logger = logging.getLogger(__name__)
 memory_router = APIRouter(prefix="/api/tenant/memory", tags=["Memory Management"])
 
 
+def convert_decimals(obj):
+    """Recursively convert DynamoDB Decimal types to int/float."""
+    from decimal import Decimal
+    if isinstance(obj, list):
+        return [convert_decimals(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: convert_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    else:
+        return obj
+
+
 @memory_router.get("/stats", response_model=MemoryStatsResponse)
-async def get_memory_stats(tenant: dict = Depends(authenticate_tenant)):
+async def get_memory_stats(tenant: dict = Depends(authenticate_tenant), conversation_id: Optional[str] = None):
     """
     Get memory statistics for your tenant.
+    
+    Parameters:
+    - conversation_id (optional): Specific conversation ID to get stats for
     
     Returns:
     - Conversation memory stats (turns, last question)
     - Pattern memory stats (categories, query count)
     """
     try:
-        app_state = get_app_state()
-        if not app_state:
-            raise HTTPException(status_code=500, detail="App state not initialized")
+        db_store = DynamoDBMemoryStore()
+        tenant_id = tenant["tenant_id"]
         
-        pipeline = get_tenant_pipeline(
-            tenant=tenant,
-            embedder=app_state['embedder'],
-            reranker=app_state['reranker'],
-            generator=app_state['generator'],
-            enable_agent=True,
-            enable_memory=True
+        if conversation_id:
+            conv_history = db_store.get_conversation_history(tenant_id, conversation_id)
+            conversation_turns = len(conv_history)
+            conversation_summary = f"Conversation {conversation_id} with {conversation_turns} turns" if conv_history else "No conversation history"
+        else:
+            all_convs = db_store.list_conversations(tenant_id)
+            conversation_turns = sum(int(c['turn_count']) for c in all_convs)
+            conversation_summary = f"{len(all_convs)} conversations with {conversation_turns} total turns"
+        
+        pattern_stats = convert_decimals(db_store.get_pattern_statistics(tenant_id))
+        
+        return MemoryStatsResponse(
+            tenant_id=tenant_id,
+            conversation_memory_enabled=True,
+            pattern_memory_enabled=True,
+            conversation_turns=conversation_turns,
+            conversation_summary=conversation_summary,
+            pattern_statistics=pattern_stats
         )
-        
-        if not pipeline.memory_manager:
-            return MemoryStatsResponse(
-                tenant_id=tenant["tenant_id"],
-                conversation_memory_enabled=False,
-                pattern_memory_enabled=False
-            )
-        
-        stats = pipeline.memory_manager.get_statistics()
-        return MemoryStatsResponse(**stats)
     except Exception as e:
         logger.error(f"Failed to get memory stats: {e}")
         raise HTTPException(
@@ -53,44 +67,30 @@ async def get_memory_stats(tenant: dict = Depends(authenticate_tenant)):
 
 
 @memory_router.post("/clear", response_model=MemoryClearResponse)
-async def clear_memory(request: MemoryClearRequest, tenant: dict = Depends(authenticate_tenant)):
+async def clear_memory(request: MemoryClearRequest, tenant: dict = Depends(authenticate_tenant), conversation_id: Optional[str] = None):
     """
     Clear memory for your tenant.
     
     Parameters:
     - memory_type: "conversation", "patterns", or "all"
+    - conversation_id (optional): Specific conversation ID to clear (only for conversation type)
     
     Returns:
     - Confirmation message
     """
     try:
-        app_state = get_app_state()
-        if not app_state:
-            raise HTTPException(status_code=500, detail="App state not initialized")
-        
-        pipeline = get_tenant_pipeline(
-            tenant=tenant,
-            embedder=app_state['embedder'],
-            reranker=app_state['reranker'],
-            generator=app_state['generator'],
-            enable_agent=True,
-            enable_memory=True
-        )
-        
-        if not pipeline.memory_manager:
-            raise HTTPException(
-                status_code=400,
-                detail="Memory not enabled for this tenant"
-            )
+        db_store = DynamoDBMemoryStore()
+        tenant_id = tenant["tenant_id"]
         
         if request.memory_type == "conversation":
-            pipeline.memory_manager.clear_conversation()
-            message = "Conversation memory cleared"
+            db_store.clear_conversation_history(tenant_id, conversation_id)
+            message = f"Conversation memory cleared" + (f" for conversation {conversation_id}" if conversation_id else " for all conversations")
         elif request.memory_type == "patterns":
-            pipeline.memory_manager.clear_patterns()
+            db_store.clear_patterns(tenant_id)
             message = "Pattern memory cleared"
         elif request.memory_type == "all":
-            pipeline.memory_manager.clear_all()
+            db_store.clear_conversation_history(tenant_id)
+            db_store.clear_patterns(tenant_id)
             message = "All memory cleared"
         else:
             raise HTTPException(
@@ -101,7 +101,7 @@ async def clear_memory(request: MemoryClearRequest, tenant: dict = Depends(authe
         return MemoryClearResponse(
             message=message,
             memory_type=request.memory_type,
-            tenant_id=tenant["tenant_id"]
+            tenant_id=tenant_id
         )
     except HTTPException:
         raise
@@ -123,33 +123,19 @@ async def export_memory(tenant: dict = Depends(authenticate_tenant)):
     - Query categories and statistics
     """
     try:
-        app_state = get_app_state()
-        if not app_state:
-            raise HTTPException(status_code=500, detail="App state not initialized")
+        db_store = DynamoDBMemoryStore()
+        patterns = db_store.get_patterns(tenant["tenant_id"])
         
-        pipeline = get_tenant_pipeline(
-            tenant=tenant,
-            embedder=app_state['embedder'],
-            reranker=app_state['reranker'],
-            generator=app_state['generator'],
-            enable_agent=True,
-            enable_memory=True
-        )
-        
-        if not pipeline.memory_manager:
-            raise HTTPException(
-                status_code=400,
-                detail="Memory not enabled for this tenant"
-            )
-        
-        patterns_json = pipeline.memory_manager.export_patterns()
-        
-        if not patterns_json:
+        if not patterns:
             return {"message": "No patterns to export", "patterns": []}
         
-        return json.loads(patterns_json)
-    except HTTPException:
-        raise
+        export_data = {
+            "tenant_id": tenant["tenant_id"],
+            "total_patterns": len(patterns),
+            "patterns": convert_decimals(patterns)
+        }
+        
+        return export_data
     except Exception as e:
         logger.error(f"Failed to export memory: {e}")
         raise HTTPException(
@@ -171,7 +157,7 @@ async def list_conversations(tenant: dict = Depends(authenticate_tenant)):
     """
     try:
         db_store = DynamoDBMemoryStore()
-        conversations = db_store.list_conversations(tenant["tenant_id"])
+        conversations = convert_decimals(db_store.list_conversations(tenant["tenant_id"]))
         
         return {
             "tenant_id": tenant["tenant_id"],
@@ -185,33 +171,3 @@ async def list_conversations(tenant: dict = Depends(authenticate_tenant)):
             detail=f"Failed to list conversations: {str(e)}"
         )
 
-
-@memory_router.delete("/conversations/{conversation_id}")
-async def delete_conversation(
-    conversation_id: str,
-    tenant: dict = Depends(authenticate_tenant)
-):
-    """
-    Delete a specific conversation.
-    
-    Parameters:
-    - conversation_id: The conversation ID to delete
-    
-    Returns:
-    - Confirmation message
-    """
-    try:
-        db_store = DynamoDBMemoryStore()
-        db_store.clear_conversation_history(tenant["tenant_id"], conversation_id)
-        
-        return {
-            "message": f"Conversation {conversation_id} deleted successfully",
-            "tenant_id": tenant["tenant_id"],
-            "conversation_id": conversation_id
-        }
-    except Exception as e:
-        logger.error(f"Failed to delete conversation {conversation_id} for {tenant['tenant_id']}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete conversation: {str(e)}"
-        )

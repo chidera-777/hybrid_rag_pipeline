@@ -20,6 +20,7 @@ import uuid
 class RAGPipeline:
     def __init__(
         self,
+        tenant_id: str,
         qdrant_url: str = "QDRANT_URL",
         qdrant_api_key: str = "QDRANT_API_KEY",
         collection_name: str = "COLLECTION_NAME",
@@ -57,6 +58,7 @@ class RAGPipeline:
         self.tool_mode = ToolMode.STRICT if tool_mode == "strict" else ToolMode.RELAXED
         self.enable_memory = enable_memory
         self.conversation_id = conversation_id
+        self.tenant_id = tenant_id
         self.agent = None
         self.tool_registry = None
         self.memory_manager = None
@@ -68,7 +70,7 @@ class RAGPipeline:
                     conversation_id = str(uuid.uuid4())
                 self.conversation_id = conversation_id
                 self.memory_manager = MemoryManager(
-                    tenant_id=collection_name,
+                    tenant_id=self.tenant_id,
                     conversation_id=conversation_id,
                     enable_conversation_memory=True,
                     enable_pattern_memory=True

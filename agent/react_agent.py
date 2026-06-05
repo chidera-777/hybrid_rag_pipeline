@@ -1,11 +1,11 @@
 import re
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from langchain_groq import ChatGroq
 from langchain_core.output_parsers import StrOutputParser
 from ingestion.base_loader import Document
 from agent.prompts import REASONING_PROMPT, ANSWER_GENERATION_PROMPT
-from agent.tools import ToolRegistry, ToolMode, ToolResult
+from agent.tools import ToolRegistry, ToolMode
 from agent.memory import MemoryManager
 
 logging.basicConfig(level=logging.INFO)
@@ -171,9 +171,11 @@ class ReActAgent:
         if self.enable_memory and self.memory_manager:
             answer_summary = self._summarize_answer(final_answer["answer"], observations)
             successful_docs = [chunk.metadata.get("source", "unknown") for chunk in all_chunks]
+            category = self._categorize_question(question)
             self.memory_manager.record_interaction(
                 question=question,
                 answer_summary=answer_summary,
+                category=category,
                 successful_docs=successful_docs
             )
         
@@ -323,9 +325,11 @@ class ReActAgent:
         if self.enable_memory and self.memory_manager:
             answer_summary = self._summarize_answer(full_answer, observations)
             successful_docs = [chunk.metadata.get("source", "unknown") for chunk in all_chunks]
+            category = self._categorize_question(question)
             self.memory_manager.record_interaction(
                 question=question,
                 answer_summary=answer_summary,
+                category=category,
                 successful_docs=successful_docs
             )
         
@@ -406,6 +410,34 @@ class ReActAgent:
         
         return thought, action, action_input
 
+    def _categorize_question(self, question: str) -> str:
+        """
+        Categorize the question into a general category.
+        Simple keyword-based categorization.
+        
+        Args:
+            question: The question text
+        
+        Returns:
+            Category string
+        """
+        q_lower = question.lower()
+        
+        if any(word in q_lower for word in ['price', 'pricing', 'cost', 'fee', 'payment', 'subscription']):
+            return 'pricing'
+        elif any(word in q_lower for word in ['api', 'code', 'implement', 'integrate', 'technical', 'sdk', 'endpoint']):
+            return 'technical'
+        elif any(word in q_lower for word in ['support', 'help', 'issue', 'problem', 'error', 'troubleshoot', 'bug']):
+            return 'support'
+        elif any(word in q_lower for word in ['feature', 'capability', 'can i', 'does it', 'functionality']):
+            return 'features'
+        elif any(word in q_lower for word in ['how to', 'tutorial', 'guide', 'setup', 'configure', 'install']):
+            return 'howto'
+        elif any(word in q_lower for word in ['policy', 'legal', 'terms', 'privacy', 'compliance', 'gdpr']):
+            return 'policy'
+        else:
+            return 'general'
+    
     def _summarize_answer(self, answer: str, observations: List[Dict]) -> str:
         """
         Generate a concise summary of the answer for memory storage.
