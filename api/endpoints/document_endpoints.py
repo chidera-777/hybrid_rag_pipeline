@@ -36,7 +36,7 @@ async def upload_tenant_data(tenant_id: str, tenant: dict = Depends(authenticate
     """
     if tenant["tenant_id"] != tenant_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    if tenant["storage_info"]["type"] != "own_s3":
+    if tenant["storage_info"]["type"] != "managed":
         raise HTTPException(status_code=400, detail="Direct upload is only available for managed storage\n Use AWS CLI to upload files")
     if len(files) > 50:
         raise HTTPException(status_code=400, detail="Too many files. Max of 50 per upload")

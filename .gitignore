@@ -9,3 +9,5 @@ aws
 *.json
 config.py
 run_eval.py
+.pytest_cache
+__pycache__
