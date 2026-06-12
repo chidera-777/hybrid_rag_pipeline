@@ -18,4 +18,5 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git remote add hf https://huggingface.co/spaces/FerdinandC777/rag-api
+          git pull https://FerdinandC777:$HF_TOKEN@huggingface.co/spaces/FerdinandC777/rag-api main --rebase
           git push https://FerdinandC777:$HF_TOKEN@huggingface.co/spaces/FerdinandC777/rag-api main
