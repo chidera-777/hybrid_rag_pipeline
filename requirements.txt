@@ -108,13 +108,11 @@ pymupdf==1.27.1
 pyparsing==3.3.2
 pypika==0.51.1
 pyproject-hooks==1.2.0
-pyreadline3==3.5.4
 pysocks==1.7.1
 pytest==9.0.3
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 python-multipart==0.0.22
-pywin32==311
 pyyaml==6.0.3
 qdrant-client==1.16.2
 rank-bm25==0.2.2
