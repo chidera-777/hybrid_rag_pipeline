@@ -13,7 +13,6 @@ from generation.generator import Generator
 from agent.react_agent import ReActAgent
 from agent.tools import ToolMode, ToolRegistry
 from agent.memory import MemoryManager
-from config import *
 import uuid
 
 
