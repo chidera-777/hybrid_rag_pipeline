@@ -1,12 +1,70 @@
-.git
-.gitignore
-.env
+# Python
 __pycache__/
-.pytest_cache/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+*.egg
+
+# Virtual environments
+.venv/
+.rag_pipeline/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Data and temporary files
 data/
-qdrant_storage/
-*.pyc
-lambda_function.zip
-.rag_pipeline
+*.tmp
+tmp/
+temp/
+
+# Tests
+tests/
+pytest_cache/
+.pytest_cache/
+*.pytest_cache
+
+# Documentation (keep README_HF.md)
+docs/
+CONVERSATION_FLOW.md
+
+# AWS
 awscliv2.zip
-aws
+task-definition.json
+
+# Examples and evaluation
+examples/
+eval/
+run_eval.py
+data/eval/
+
+# Environment files (will be set as HF secrets)
+.env
+.env.*
+config.json
+
+# Bruno API tests
+.bruno/
+
+# Docker files
+docker-compose.yml
+Dockerfile.lambda
+lambda_requirements.txt
+
+# Project specific
+README.md

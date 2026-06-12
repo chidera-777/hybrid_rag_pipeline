@@ -2,6 +2,7 @@ data
 .rag_pipeline
 *.pyc
 qdrant_storage
+HUGGINGFACE_DEPLOYMENT.md
 .env
 .bruno(rag)
 awscliv2.zip
