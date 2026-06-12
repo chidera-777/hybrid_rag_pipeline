@@ -1,3 +1,16 @@
+---
+title: RAG-as-a-Service
+emoji: 🤖
+colorFrom: blue
+colorTo: purple
+sdk: docker
+sdk_version: "3.10"
+python_version: "3.10"
+app_file: api/main.py
+pinned: false
+license: mit
+---
+
 # RAG-as-a-Service
 
 RAG-as-a-Service is a multi-tenant Retrieval-Augmented Generation API built with FastAPI. Each tenant can register with the service, connect a Qdrant collection, upload or provide documents, build an isolated index, and query that knowledge base through standard RAG or agentic ReAct-style reasoning.
